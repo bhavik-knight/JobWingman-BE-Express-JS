@@ -1,0 +1,116 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl"]
+}
+
+// PostgreSQL setup (using string values for statuses to maintain backward compatibility)
+// Valid values for Application Status: "DRAFT", "APPLIED", "INTERVIEWING", "REJECTED", "OFFER"
+// Valid values for Draft Status: "GENERATED", "EDITED", "APPROVED", "SENT", "FAILED"
+// Valid values for Suggestion Type: "ADD", "EXPAND", "CLARIFY"
+// Valid values for Job Status: "PENDING", "PROCESSING", "COMPLETED", "FAILED"
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String?
+  oauthToken   String?       // Encrypted OAuth2 token for mail
+  refreshToken String?       // Encrypted Refresh token
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  applications Application[]
+}
+
+model Resume {
+  id             String        @id @default(uuid())
+  filePath       String        // Path to uploaded PDF/DOCX
+  parsedText     String        // Extracted layout Markdown/JSON
+  structuredData Json?         // Structured JSON sections (experience, skills, contact, etc.)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  applications   Application[]
+}
+
+model JobDescription {
+  id           String        @id @default(uuid())
+  title        String
+  company      String
+  rawText      String
+  url          String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  applications Application[]
+}
+
+model Application {
+  id               String        @id @default(uuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id])
+  resumeId         String
+  resume           Resume        @relation(fields: [resumeId], references: [id])
+  jobDescriptionId String
+  jobDescription   JobDescription @relation(fields: [jobDescriptionId], references: [id])
+  status           String        @default("DRAFT")
+  matchScore       Float         @default(0.0)
+  gatingFlag       Boolean       @default(true) // true if matchScore < 70-75%
+  appliedAt        DateTime?
+  optInAutoSend    Boolean       @default(false) // Day-10 auto-send opt-in
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  suggestions      Suggestion[]
+  emailDrafts      EmailDraft[]
+}
+
+model Suggestion {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  regionId      String      // Maps to a stable parsed region ID
+  regionText    String      // Original text in that region
+  type          String      // "ADD", "EXPAND", "CLARIFY"
+  content       String      // Suggested replacement/content
+  rationale     String      // Explanation of why this suggestion was made
+  createdAt     DateTime    @default(now())
+}
+
+model EmailDraft {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  subject       String
+  body          String
+  status        String      @default("GENERATED") // "GENERATED", "EDITED", "APPROVED", "SENT", "FAILED"
+  scheduledSend DateTime?
+  sentAt        DateTime?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model JobQueue {
+  id        String   @id @default(uuid())
+  type      String   // "DAY_7_CHECK" or "DAY_10_CHECK"
+  payload   String   // JSON string containing application ID, etc.
+  runAt     DateTime // When the job should execute
+  status    String   @default("PENDING") // "PENDING", "PROCESSING", "COMPLETED", "FAILED"
+  attempts  Int      @default(0)
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model parsing_logs {
+  id                  Int      @id @default(autoincrement())
+  timestamp           DateTime @default(now()) @db.Timestamp(6)
+  resume_name         String?  @db.VarChar(255)
+  raw_text_length     Int?
+  markdown_text       String?
+  raw_llm_output      String?
+  cleaned_json_output Json?    @db.JsonB
+  is_success          Boolean?
+  error_message       String?
+}

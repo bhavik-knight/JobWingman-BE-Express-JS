@@ -1,0 +1,33 @@
+{
+  "name": "jobwingman-api",
+  "version": "1.0.0",
+  "description": "Node Express backend for JobWingman",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.11.0",
+    "bullmq": "^5.78.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.11.1",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.12"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.9.3",
+    "@types/nodemailer": "^8.0.1",
+    "nodemon": "^3.1.14",
+    "prisma": "^5.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
