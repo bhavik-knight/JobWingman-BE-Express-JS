@@ -29,7 +29,17 @@ const upload = multer({ storage });
 // 1. Upload and process application
 router.post('/', upload.single('resume'), async (req: Request, res: Response): Promise<any> => {
   try {
-    const { title, company, jobDescriptionText, email } = req.body;
+    const {
+      title,
+      company,
+      jobDescriptionText,
+      email,
+      jobPostingDate,
+      deadline,
+      jobLink,
+      referralName,
+      referralEmail
+    } = req.body;
     const file = req.file;
 
     if (!file) {
@@ -52,40 +62,30 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
       });
     }
 
-    // Call Python ML microservice to parse the resume file
-    const formData = new FormData();
+    // Call Python ML microservice to evaluate the resume file using multipart/form-data
+    const mlFormData = new FormData();
     const fileBuffer = fs.readFileSync(file.path);
     const blob = new Blob([fileBuffer], { type: file.mimetype });
-    formData.append('file', blob, file.originalname);
-
-    let parsedResumeData: any;
-    try {
-      const parseResponse = await fetch(`${ML_SERVICE_URL}/api/v1/parse`, {
-        method: 'POST',
-        body: formData
-      });
-      if (!parseResponse.ok) {
-        throw new Error(`ML service parse returned status ${parseResponse.status}`);
-      }
-      parsedResumeData = await parseResponse.json();
-    } catch (err) {
-      console.error('Failed to connect to ML service parser:', err);
-      parsedResumeData = {
-        rawText: 'John Doe - Resume mock content',
-        markdown: '# John Doe\nSoftware Engineer',
-        sections: []
-      };
+    mlFormData.append('file', blob, file.originalname);
+    mlFormData.append('position', title || 'Untitled Position');
+    mlFormData.append('company', company || 'Unknown Company');
+    mlFormData.append('job_description', jobDescriptionText);
+    mlFormData.append('job_posting_date', jobPostingDate || new Date().toISOString());
+    if (deadline) {
+      mlFormData.append('deadline', deadline);
+    }
+    if (referralName) {
+      mlFormData.append('referral_name', referralName);
+    }
+    if (referralEmail) {
+      mlFormData.append('referral_email', referralEmail);
     }
 
     let evaluationData: any;
     try {
       const evaluateResponse = await fetch(`${ML_SERVICE_URL}/api/v1/evaluate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          parsedResume: parsedResumeData,
-          jobDescription: jobDescriptionText
-        })
+        body: mlFormData
       });
       if (!evaluateResponse.ok) {
         throw new Error(`ML service evaluate returned status ${evaluateResponse.status}`);
@@ -94,43 +94,43 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
     } catch (err) {
       console.error('Failed to connect to ML service evaluator:', err);
       evaluationData = {
-        score: 65.0,
-        confidence: 0.9,
-        suggestions: [
-          {
-            regionId: 'sec_experience',
-            regionText: 'Experience section placeholder',
-            type: 'EXPAND',
-            content: 'Add details about Node.js and REST API architectures.',
-            rationale: 'The JD requires Node.js Express backend expertise.'
-          }
-        ]
+        markdown: '# John Doe\nSoftware Engineer',
+        extracted_profile: {
+          name: 'John Doe',
+          email: 'guest@jobwingman.local',
+          phone: '',
+          summary: ['Software Engineer'],
+          education: [],
+          experience: [],
+          skills: []
+        },
+        evaluation_metrics: {
+          match_score: 65.0,
+          summary_analysis: 'Fallback evaluation due to service error',
+          missing_keywords: [],
+          tailoring_recommendations: [],
+          suggestions: [
+            {
+              regionId: 'sec_experience',
+              regionText: 'Experience section placeholder',
+              type: 'EXPAND',
+              content: 'Add details about Node.js and REST API architectures.',
+              rationale: 'The JD requires Node.js Express backend expertise.'
+            }
+          ]
+        }
       };
     }
 
-    const matchScore = evaluationData.score;
-    if (matchScore < 70.0) {
-      // Clean up local file upload to avoid orphans
-      if (file && fs.existsSync(file.path)) {
-        try {
-          fs.unlinkSync(file.path);
-        } catch (unlinkErr) {
-          console.error('Failed to clean up uploaded file:', unlinkErr);
-        }
-      }
-      return res.status(422).json({
-        error: 'Application tracking blocked due to low match score (< 70%).',
-        matchScore: matchScore,
-        suggestions: evaluationData.suggestions
-      });
-    }
+    const matchScore = evaluationData.evaluation_metrics.match_score;
+    const gatingFlag = matchScore < 70.0;
 
     // Persist Resume in database
     const resume = await prisma.resume.create({
       data: {
         filePath: file.path,
-        parsedText: parsedResumeData.markdown || parsedResumeData.rawText || '',
-        structuredData: parsedResumeData.structured || {
+        parsedText: evaluationData.markdown || '',
+        structuredData: evaluationData.extracted_profile || {
           name: '',
           email: '',
           phone: '',
@@ -147,11 +147,14 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
       data: {
         title: title || 'Untitled Position',
         company: company || 'Unknown Company',
-        rawText: jobDescriptionText
+        rawText: jobDescriptionText,
+        postingDate: jobPostingDate ? new Date(jobPostingDate) : null,
+        deadline: deadline ? new Date(deadline) : null,
+        url: jobLink || null,
+        referralName: referralName || null,
+        referralEmail: referralEmail || null
       }
     });
-
-    const gatingFlag = false; // Never gated because we enforce score >= 70
 
     const application = await prisma.application.create({
       data: {
@@ -162,7 +165,7 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
         gatingFlag: gatingFlag,
         status: 'DRAFT',
         suggestions: {
-          create: evaluationData.suggestions.map((s: any) => ({
+          create: evaluationData.evaluation_metrics.suggestions.map((s: any) => ({
             regionId: s.regionId,
             regionText: s.regionText,
             type: s.type,
@@ -317,6 +320,56 @@ router.get('/:id/compile-pdf', async (req: Request, res: Response): Promise<any>
     return res.send(Buffer.from(buffer));
   } catch (error: any) {
     console.error('Error compiling Typst resume:', error);
+    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+  }
+});
+
+// 7. Update application details
+router.put('/:id', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const id = req.params.id as string;
+    const { status, appliedAt, downloadedAt } = req.body;
+
+    const application = await prisma.application.findUnique({
+      where: { id }
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const updatedData: any = {};
+    if (status !== undefined) updatedData.status = status;
+    if (appliedAt !== undefined) updatedData.appliedAt = appliedAt ? new Date(appliedAt) : null;
+    if (downloadedAt !== undefined) updatedData.downloadedAt = downloadedAt ? new Date(downloadedAt) : null;
+
+    const updatedApp = await prisma.application.update({
+      where: { id },
+      data: updatedData,
+      include: {
+        resume: true,
+        jobDescription: true,
+        suggestions: true,
+        emailDrafts: true
+      }
+    });
+
+    // If the application is updated to APPLIED, schedule the DAY_7_CHECK if not already scheduled
+    if (status === 'APPLIED' && application.status !== 'APPLIED') {
+      try {
+        await emailQueue.add(
+          'DAY_7_CHECK',
+          { applicationId: id },
+          { delay: 30 * 1000 } // delay for testing
+        );
+      } catch (queueErr) {
+        console.error('Failed to add DAY_7_CHECK to queue:', queueErr);
+      }
+    }
+
+    return res.json(updatedApp);
+  } catch (error: any) {
+    console.error('Error updating application:', error);
     return res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
 });

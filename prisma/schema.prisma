@@ -41,6 +41,10 @@ model JobDescription {
   company      String
   rawText      String
   url          String?
+  postingDate  DateTime?
+  deadline     DateTime?
+  referralName String?
+  referralEmail String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   applications Application[]
@@ -58,6 +62,7 @@ model Application {
   matchScore       Float         @default(0.0)
   gatingFlag       Boolean       @default(true) // true if matchScore < 70-75%
   appliedAt        DateTime?
+  downloadedAt     DateTime?
   optInAutoSend    Boolean       @default(false) // Day-10 auto-send opt-in
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
