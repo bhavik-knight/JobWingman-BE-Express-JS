@@ -195,7 +195,8 @@ router.get('/', async (req: Request, res: Response) => {
       include: {
         resume: true,
         jobDescription: true,
-        suggestions: true
+        suggestions: true,
+        emailDrafts: true
       },
       orderBy: { createdAt: 'desc' }
     });
