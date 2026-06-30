@@ -59,7 +59,7 @@ const worker = new Worker<JobData>(
         });
 
         if (app && app.status === 'APPLIED' && app.optInAutoSend) {
-          const draft = app.emailDrafts.find(d => d.status === 'APPROVED' || d.status === 'GENERATED');
+          const draft = app.emailDrafts.find((d: any) => d.status === 'APPROVED' || d.status === 'GENERATED');
           if (draft) {
             console.log(`Scheduler (BullMQ): Sending email automatically for application ${app.id} via Nodemailer...`);
             

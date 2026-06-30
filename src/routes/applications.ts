@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../config/prisma';
 import { emailQueue } from '../config/queue';
+import { createDynamicTransporter } from '../utils/mailer';
 
 const router = express.Router();
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
@@ -181,7 +182,13 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
       }
     });
 
-    return res.status(201).json(application);
+    return res.status(201).json({
+      ...application,
+      success: true,
+      applicationId: application.id,
+      evaluation_metrics: evaluationData.evaluation_metrics,
+      extracted_profile: evaluationData.extracted_profile || null
+    });
   } catch (error: any) {
     console.error('Error creating application:', error);
     return res.status(500).json({ error: 'Internal Server Error', details: error.message });
@@ -204,6 +211,51 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
+});
+
+router.get('/follow-ups', async (req: Request, res: Response): Promise<any> => {
+    try {
+        const now = new Date(); // Dynamically anchors to June 30, 2026
+        
+        // Create a safe 24-hour window for 7 days ago
+        const sevenDaysAgoStart = new Date(now);
+        sevenDaysAgoStart.setDate(now.getDate() - 8);
+        const sevenDaysAgoEnd = new Date(now);
+        sevenDaysAgoEnd.setDate(now.getDate() - 6);
+
+        // Create a safe window for today's deadlines
+        const todayStart = new Date(now);
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(now);
+        todayEnd.setHours(23, 59, 59, 999);
+
+        const apps = await prisma.application.findMany({
+            where: {
+                OR: [
+                    { status: 'APPLIED', updatedAt: { gte: sevenDaysAgoStart, lte: sevenDaysAgoEnd } },
+                    { status: 'DRAFT', jobDescription: { deadline: { gte: todayStart, lte: todayEnd } } }
+                ]
+            },
+            include: {
+                jobDescription: true
+            }
+        });
+
+        // Map database fields to top-level fields for the frontend layout
+        const mappedData = apps.map(app => ({
+            id: app.id,
+            status: app.status,
+            title: app.jobDescription?.title || 'Position',
+            company: app.jobDescription?.company || 'Company',
+            deadline: app.jobDescription?.deadline,
+            updatedAt: app.updatedAt,
+            createdAt: app.createdAt
+        }));
+
+        return res.status(200).json({ success: true, data: mappedData });
+    } catch (error: any) {
+        return res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // 3. Get application by ID
@@ -373,6 +425,45 @@ router.put('/:id', async (req: Request, res: Response): Promise<any> => {
     console.error('Error updating application:', error);
     return res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
+});
+
+router.post('/:id/send-email', async (req, res) => {
+    const { to, subject, body } = req.body;
+    const emailUser = process.env.DEMO_EMAIL_USER;
+    const appPassword = process.env.DEMO_EMAIL_APP_PASS;
+
+    // Quick guard conditions for local environment safety
+    if (!to || !subject || !body) {
+        return res.status(400).json({ success: false, error: "Missing required payload parameters: to, subject, or body." });
+    }
+
+    if (!emailUser || !appPassword) {
+        return res.status(500).json({ success: false, error: "SMTP credentials are missing from the local environment (.env)." });
+    }
+
+    try {
+        // Create connection on the fly based on the user's configured email domain string
+        const transporter = createDynamicTransporter(emailUser, appPassword);
+
+        // Execute SMTP delivery
+        await transporter.sendMail({
+            from: emailUser,
+            to: to,
+            subject: subject,
+            text: body // Sends the plaintext string draft directly
+        });
+
+        return res.status(200).json({ 
+            success: true, 
+            message: "Follow-up email dispatched successfully from local SMTP node." 
+        });
+    } catch (error: any) {
+        console.error("Local SMTP dispatch failed:", error);
+        return res.status(500).json({ 
+            success: false, 
+            error: `Local mailer failure: ${error.message}` 
+        });
+    }
 });
 
 export default router;

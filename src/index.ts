@@ -1,13 +1,13 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import prisma from './config/prisma';
 import applicationRouter from './routes/applications';
 import resumeRouter from './routes/resumes';
 import emailDraftRouter from './routes/emailDrafts';
 import { startScheduler } from './workers/scheduler';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
