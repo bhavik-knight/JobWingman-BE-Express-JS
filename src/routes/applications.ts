@@ -39,7 +39,8 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
       deadline,
       jobLink,
       referralName,
-      referralEmail
+      referralEmail,
+      modelProvider
     } = req.body;
     const file = req.file;
 
@@ -72,6 +73,7 @@ router.post('/', upload.single('resume'), async (req: Request, res: Response): P
     mlFormData.append('company', company || 'Unknown Company');
     mlFormData.append('job_description', jobDescriptionText);
     mlFormData.append('job_posting_date', jobPostingDate || new Date().toISOString());
+    mlFormData.append('model_provider', modelProvider || 'gemini');
     if (deadline) {
       mlFormData.append('deadline', deadline);
     }
